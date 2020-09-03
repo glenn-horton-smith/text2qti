@@ -191,6 +191,8 @@ class CalculatedVar(object):
             raise Text2qtiError(f'Specified maximum {maximum} for {name} inconsistent with decimal places {decimal_places}.')
         if maximum < minimum:
             raise Text2qtiError(f'Maximum is less than minimum for CalculatedVar {name}.')
+        if re.match('^[a-zA-Z][a-zA-Z0-9]*$', name) is None:
+            raise Text2qtiError(f'Invalid name for CalculatedVar {name}, must be alpha followed by alphanum, no underscores.')
         self.name = name
         self.minimum = minimum
         self.maximum = maximum
