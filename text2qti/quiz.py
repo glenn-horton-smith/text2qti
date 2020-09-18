@@ -26,6 +26,7 @@ import tempfile
 import functools
 import operator
 import random
+import warnings
 from typing import Dict, List, Optional, Set, Union
 from .config import Config
 from .err import Text2qtiError
@@ -234,7 +235,26 @@ class Formula(object):
     
     def __init__(self, formula: str, decimal_places: int):
         if '**' in formula:
-            raise Text2qtiError(f'Formula contains **, must use ^ for Canvas-compatible formulas.')
+            raise Text2qtiError('Formula contains **, must use ^ for Canvas-compatible formulas')
+        # the following is a workaround for Canvas formulas not supporting exponential notation
+        if re.search('[0-9.][eE]', formula):
+            warnings.warn(f'Formula contains exponential notation, not supported in Canvas. Converting: {formula}')
+            while True:
+                m = re.search('([0-9.]+)[eE]([-+]?[0-9]+)', formula)
+                if m is None:
+                    break
+                mant_str = m.groups()[0]
+                expon = int(m.groups()[1])
+                if expon < 0:
+                    mult_str = '0.' + '0'*(-expon-1) + '1'
+                else:
+                    mult_str = '1' + '0'*expon
+                if mant_str == '1':
+                    num_str = mult_str
+                else:
+                    num_str = f'({mant_str}*{mult_str})'
+                formula = (formula[:m.start()] + num_str + formula[m.end():])
+            warnings.warn(f'Converted formula: {formula}')
         self.formula = formula
         self.decimal_places = decimal_places
         self.delta = 10**(-decimal_places)
