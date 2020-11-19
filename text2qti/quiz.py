@@ -184,6 +184,10 @@ class CalculatedVar(object):
     '''
     def __init__(self, name: str, minimum: float, maximum:float,
                  decimal_places: int):
+        if decimal_places < 0 or decimal_places > 3:
+            warnings.warn(f'{decimal_places} decimal places specified for variable {name}'
+                          ' but Canvas requires decimal places on variables to be between 0 and 3.'
+                          ' Canvas will not be able to regenerate values.')
         delta = 10**(-decimal_places)
         fcheck1 = lambda x: abs(x - round(x))
         if fcheck1(minimum/delta) > 1e-6:
@@ -255,6 +259,10 @@ class Formula(object):
                     num_str = f'({mant_str}*{mult_str})'
                 formula = (formula[:m.start()] + num_str + formula[m.end():])
             warnings.warn(f'Converted formula: {formula}')
+        if decimal_places < 0 or decimal_places > 4:
+            warnings.warn(f'{decimal_places} decimal places specified for formula,'
+                          ' but Canvas requires decimal places on formulas to be between 0 and 4.'
+                          ' Canvas will not be able to regenerate values.')
         self.formula = formula
         self.decimal_places = decimal_places
         self.delta = 10**(-decimal_places)
@@ -304,7 +312,10 @@ class CalculatedVarSets(object):
             vs = list( self.vars[i].valueat(coords[i]) for i in range(nvar) )
             self.valsets.append(vs)
             localdict = dict((self.vars[i].name, vs[i]) for i in range(nvar))
-            answer = f.eval( localdict )
+            try:
+                answer = f.eval( localdict )
+            except NameError as e:
+                raise Text2qtiError(f'Unknown symbol: {e}, localdict = {localdict}')
             self.answers.append(answer)
             # print("Debug: %s at %s is %g" % (f.formula, localdict, answer))
 

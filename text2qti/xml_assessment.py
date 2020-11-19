@@ -457,8 +457,8 @@ ITEMPROC_EXTENSION_CALCULATED_START = '''\
 
 ITEMPROC_EXTENSION_CALCULATED_VAR = '''\
                 <var name="{name}" scale="{scale}">
-                  <min>{minimum}</min>
-                  <max>{maximum}</max>
+                  <min>{minimum:.{scale}f}</min>
+                  <max>{maximum:.{scale}f}</max>
                 </var>
 '''
 
