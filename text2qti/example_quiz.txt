@@ -1,0 +1,113 @@
+Quiz title: text2qti test quiz
+Quiz description: Checking sample text2qti questions
+
+% multiple choice
+Title: An addition question
+Points: 2
+1.  What is 2+3?
+... General question feedback.
++   Feedback for correct answer.
+-   Feedback for incorrect answer.
+a)  6
+... Feedback for this particular answer.
+b)  1
+... Feedback for this particular answer.
+*c) 5
+... Feedback for this particular answer.
+
+% multiple answers
+1.  Which of the following are dinosaurs?
+[ ] Woolly mammoth
+[*] Tyrannosaurus rex
+[*] Triceratops
+[ ] Smilodon fatalis
+
+% numeric answers
+1.  What is the square root of 2?
+=   1.4142 +- 0.0001
+
+2.  What is the cube root of 2?
+=   [1.2598, 1.2600]
+
+3.  What is 2+3? (Enter a number.)
+=   5
+
+% short answer / fill in the blank
+1.  Who lives at the North Pole?
+*   Santa
+*   Santa Claus
+*   Father Christmas
+*   Saint Nicholas
+*   Saint Nick
+
+% essay
+1.  Write an essay.
+... General question feedback.
+____
+
+% file upload
+1.  Upload a file.
+... General question feedback.
+^^^^
+
+Text title:  Instructions about the next questions
+Text:  General comments about the next questions.
+       The next question is from a question group
+
+GROUP
+pick: 1
+points per question: 1
+
+1.  A question.
+*a) true
+b)  false
+
+2.  Another question.
+*a) true
+b)  false
+
+END_GROUP
+
+% formula
+1.  What is the square root of [x]^2+[y]^2?
+?v x 51.0 61.0 0
+?v y 25.0 25.9 1
+?a   (sqrt(x^2+y^2)) +- 0.6
+?generate 100
+
+2.  What is the arctangent of [y]/[x] in degrees?
+?v x 51.0 61.0 1
+?v y 25.0 25.9 1
+?a   atan(y/x)*180/pi +- 0.06 1
+?generate 100
+
+% calculated MC
+1.  What is the arctangent of [y]/[x]?
+?v x 51.0 61.0 1
+?v y 25.0 25.9 1
+?) {atan(y/x):.3f} degrees
+?) {atan(y/x)*180/pi:.1f} radians
+?*) {atan(y/x):.3f} radians
+?generate 5
+
+2. What is the area of a rectangle [x] m wide and [y] mm long? [Note units!]
+?v x 51.0 61.0 1
+?v y 25.0 25.9 1
+?) {x*y:.0f} mm<sup>2</sup>
+?) {x*y:.0f} m<sup>2</sup>
+?*) {x*0.001*y:.3f} m<sup>2</sup>
+?) None of the above.
+?generate 5
+
+% 3. A [M]-kg person has a total blood volume of about [Vblood] L.
+%    If this person donates [Vdonate] L of blood, what 
+%    fraction of their blood have they donated?
+% ?v M 55 75 0
+% ?f Vblood = 0.077*M 1
+% ?f Vdonate 0.47 0.50 2
+% ?*) ({Vdonate} L)/({Vblood} L) = {Vdonate/Vblood:.2g}
+% ?) ({Vblood} L)/({Vdonate} L) = {Vblood/Vdonate:.2g}
+% ?) ({Vblood} L)-({Vdonate} L) = {Vblood-Vdonate:.3f} L
+% ?) {Vdonate}×{Vblood} L = {Vdonate*Vblood:.3f} L
+% ?generate 84
+
