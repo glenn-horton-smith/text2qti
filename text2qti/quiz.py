@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# -*- codin: utf-8 -*-
 #
 # Copyright (c) 2020, Geoffrey M. Poore
 # All rights reserved.
@@ -52,6 +52,8 @@ start_patterns = {
     'calculated_var': r'\?v',
     'calculated_answer': r'\?a',
     'calculated_generations': r'\?generate',
+    'calculated_correct_choice': r'\?\*\)',
+    'calculated_incorrect_choice': r'\?\)',
     'question_title': r'[Tt]itle:',
     'question_points': r'[Pp]oints:',
     'text_title': r'[Tt]ext [Tt]itle:',
@@ -238,6 +240,17 @@ class Formula(object):
         }
     
     def __init__(self, formula: str, decimal_places: int):
+        '''
+        formula is the formula, in Canvas-compatible form.
+        
+        decimal_places is the number of digits to the right of the decimal
+        in fixed notation.  
+        If decimal_places is > 15 then it will be 
+        treated as infinite and no rounding will be done. 
+        Canvas does not support values less than 0 or more than 4
+        for this parameter. A warning to that effect will be printed if decimal_places 
+        is less than 0 or greater than 4, unless decimal_places is exactly 99.
+        '''
         if '**' in formula:
             raise Text2qtiError('Formula contains **, must use ^ for Canvas-compatible formulas')
         # the following is a workaround for Canvas formulas not supporting exponential notation
@@ -259,13 +272,13 @@ class Formula(object):
                     num_str = f'({mant_str}*{mult_str})'
                 formula = (formula[:m.start()] + num_str + formula[m.end():])
             warnings.warn(f'Converted formula: {formula}')
-        if decimal_places < 0 or decimal_places > 4:
+        if decimal_places < 0 or decimal_places > 4 and decimal_places != 99:
             warnings.warn(f'{decimal_places} decimal places specified for formula,'
                           ' but Canvas requires decimal places on formulas to be between 0 and 4.'
                           ' Canvas will not be able to regenerate values.')
         self.formula = formula
         self.decimal_places = decimal_places
-        self.delta = 10**(-decimal_places)
+        self.delta = 10**(-decimal_places) if decimal_places <= 15 else 0.0
         pf = formula
         pf = pf.replace("&lt;","<").replace("&gt;",">")
         pf = pf.replace("^", "**")
@@ -275,9 +288,25 @@ class Formula(object):
         self.pyexpr = compile(pf, '', 'eval')
         
     def eval(self, vdict: Dict[str, float]):
-        v = eval(self.pyexpr, self.FORMULA_EVAL_GLOBALS, vdict)
-        v = self.delta * round(v/self.delta)
+        try:
+            v = eval(self.pyexpr, self.FORMULA_EVAL_GLOBALS, vdict)
+        except NameError as e:
+            raise Text2qtiError(f'While evaluating {self.formula}: Unknown symbol {e}; known symbols {vdict}')
+        if self.delta > 0.0:
+            v = self.delta * round(v/self.delta)
         return v
+
+
+class CalculatedDepVar(Formula):
+    '''
+    Represents a dependent variable with a name, string representation
+    of the formula for calculating it, and the number of digits
+    to the right of the decimal to keep in the result.
+    Use 99 for decimal_places if no rounding is desired.
+    '''
+    def __init__(self, name: str, formula: str, decimal_places: int):
+        super().__init__(formula, decimal_places)
+        self.name = name
 
 
 class CalculatedVarSets(object):
@@ -288,7 +317,9 @@ class CalculatedVarSets(object):
     '''
     def __init__(self):
         self.vars: List[CalculatedVar] = []
-        self.valsets: List[List[float]] = []
+        self.depvars: List[CalculatedDepVar] = []
+        self.varindexes: Dict[str,int] = {}
+        self.valsets: List[List[float]] = []  # indexed by [igeneration][ivar]
         self.answers: List[float] = []
         self.ids: List[str] = []
         
@@ -310,13 +341,15 @@ class CalculatedVarSets(object):
         for genid in genids:
             coords = unravel(genid, var_nposs_list)
             vs = list( self.vars[i].valueat(coords[i]) for i in range(nvar) )
-            self.valsets.append(vs)
             localdict = dict((self.vars[i].name, vs[i]) for i in range(nvar))
-            try:
+            for vdep in self.depvars:
+                vdepval = vdep.eval( localdict )
+                vs.append(vdepval)
+                localdict[vdep.name] = vdepval
+            self.valsets.append(vs)
+            if f:
                 answer = f.eval( localdict )
-            except NameError as e:
-                raise Text2qtiError(f'Unknown symbol: {e}, localdict = {localdict}')
-            self.answers.append(answer)
+                self.answers.append(answer)
             # print("Debug: %s at %s is %g" % (f.formula, localdict, answer))
 
     
@@ -593,8 +626,11 @@ class Question(object):
         vmax = float(parts[2])
         vdecimals = int(parts[3])
         if f'[{vname}]' not in self.question_raw:
-            raise Text2qtiError(f'Calculated question defines variable that does not appear in text.')
+            raise Text2qtiError(f'Calculated question defines variable {vname} that does not appear in text.')
+        if vname in self.calculated_varsets.varindexes:
+            raise Text2qtiError(f'Calculated question defines variable {vname} more than once.')
         self.calculated_varsets.vars.append(CalculatedVar(vname, vmin, vmax, vdecimals))
+        self.calculated_varsets.varindexes[vname] = len(self.calculated_varsets.varindexes)
         
     def append_calculated_answer(self, text: str):
         if self.type is None:
@@ -604,10 +640,10 @@ class Question(object):
         elif self.type != 'calculated_question':
             raise Text2qtiError(f'Question type "{self.type}" does not support calculated answers')
         if self.calculated_formula is not None:
-            raise Text2qtiError(f'Cannot specify calculated response multiple times')
+            raise Text2qtiError('Cannot specify calculated response multiple times')
         ipm = text.find(' +- ')
         if ipm < 0:
-            raise Text2qtiError(f'Formula answer must end with " +- " followed by tolerance and number of decimal places.')
+            raise Text2qtiError('Formula answer must end with " +- " followed by tolerance and number of decimal places.')
         formula_text = text[:ipm]
         parts = text[(ipm+3):].split()
         tol = float(parts[0])
@@ -620,10 +656,8 @@ class Question(object):
 
     def append_calculated_generations(self, text: str):
         if self.type is None:
-            self.type = 'calculated_question'
-            if self.choices:
-                raise Text2qtiError(f'Question type "{self.type}" is not compatible with existing choices')
-        elif self.type != 'calculated_question':
+            raise Text2qtiError('Cannot generate calculated values without defined variables.')
+        elif self.type != 'calculated_question' and self.type != 'calculated_choice_question':
             raise Text2qtiError(f'Question type "{self.type}" does not support calculated answers')
         num_gens = int(text)
         if num_gens > 200:
@@ -631,6 +665,81 @@ class Question(object):
         elif num_gens <= 0:
             raise Text2qtiError(f'Requested number of calculated variable generations ({num_gens}) is not positive.')
         self.calculated_generations = num_gens
+        
+    def append_calculated_choice(self, text: str, correct: bool):
+        if self.type is None:
+            self.type = 'calculated_choice_question'
+        elif self.type == 'calculated_question' and self.calculated_formula == None:
+            self.type = 'calculated_choice_question'
+        elif self.type != 'calculated_choice_question':
+            raise Text2qtiError(f'Question type "{self.type}" does not support calculated choice answers')
+        if self.calculated_varsets is None:
+            raise Text2qtiError('Specify variables before specifying calculated choices.')
+        choice = Choice(text, correct=correct, question_hash_digest=self.hash_digest, md=self.md)
+        if choice.choice_html_xml in self._choice_set:
+            raise Text2qtiError('Duplicate choice for question')
+        self._choice_set.add(choice.choice_html_xml)
+        self.choices.append(choice)
+        if correct:
+            self.correct_choices += 1
+        for braceexpr in re.finditer(r'\{[^}]+\}', text):
+            bexpr = braceexpr.group()[1:braceexpr.group().find(':')]
+            if bexpr not in self.calculated_varsets.varindexes:
+                self.calculated_varsets.depvars.append(CalculatedDepVar(bexpr, bexpr, 99))
+                self.calculated_varsets.varindexes[bexpr] = len(self.calculated_varsets.varindexes)
+                
+    
+    def append_calculated_correct_choice(self, text: str):
+        self.append_calculated_choice(text, True)
+
+    def append_calculated_incorrect_choice(self, text: str):
+        self.append_calculated_choice(text, False)
+    
+    def do_square_bracket_expansion(self, text: str, igen: int):
+        '''
+        Used internally for calculated choice questions.
+        Replaces [varname] with value of variable from generation igen
+        '''
+        varsets = self.calculated_varsets
+        if igen < 0 or igen >= self.calculated_generations:
+            raise Text2qtiError(f'Internal error, igen {igen} > number of generations {self.calculated_generations}')
+        while True:
+            bmatch = re.search(r'\[[A-Za-z][A-Za-z0-9]*\]', text)
+            if not bmatch:
+                break
+            vname = bmatch.group()[1:-1]
+            if not vname in varsets.varindexes:
+                raise Text2qtiError(f'No variable named {vname} in {varsets.vars}')
+            ivar = varsets.varindexes[vname]
+            val = varsets.valsets[igen][ivar]
+            text = f'{text[:bmatch.start()]}{val:.{varsets.vars[ivar].decimal_places}f}{text[bmatch.end():]}'
+        return text
+            
+
+    def do_curly_brace_expansion(self, text: str, igen: int):
+        '''
+        Used internally for calculated choice questions.
+        Replaces {expression} or {expression:fmt} with value of variable
+        from generation igen
+        '''
+        varsets = self.calculated_varsets
+        while True:
+            bmatch = re.search(r'\{[^}]+\}', text)
+            if not bmatch:
+                break
+            icolon = bmatch.group().find(':')
+            vname = bmatch.group()[1:icolon]
+            if not vname in varsets.varindexes:
+                raise Text2qtiError(f'No variable named {vname} in {varsets.vars}')
+            ivar = varsets.varindexes[vname]
+            val = varsets.valsets[igen][ivar]
+            if icolon > 0:
+                fmt = bmatch.group()[icolon+1:-1]
+                valstr = f'{val:{fmt}}'
+            else:
+                valstr = f'{val}'
+            text = f'{text[:bmatch.start()]}{valstr}{text[bmatch.end():]}'
+        return text
 
     def finalize(self):
         if self.type is None:
@@ -656,7 +765,9 @@ class Question(object):
                 raise Text2qtiError('Question must provide more than one choice')
             if self.correct_choices < 1:
                 raise Text2qtiError('Question must specify a correct choice')
-        elif self.type == 'calculated_question':
+        elif self.type == 'calculated_question' or self.type == 'calculated_choice_question':
+            if self.calculated_formula is None and self.correct_choices == 0:
+                raise Text2qtiError('Question must specify an answer')
             self.calculated_varsets.generate(self.calculated_generations, self.calculated_formula)
         
 
@@ -1218,6 +1329,46 @@ class Quiz(object):
         if not isinstance(last_question_or_delim, Question):
             raise Text2qtiError('Cannot have a generated calculated var set without a question')
         last_question_or_delim.append_calculated_generations(text)
+        if last_question_or_delim.type == 'calculated_choice_question':
+            calc_choice_question = self.questions_and_delims.pop()
+            calc_choice_question.finalize()
+            self.append_start_group('')
+            self.append_group_pick('1')
+            if calc_choice_question.points_possible_raw:
+                self.append_group_points_per_question(calc_choice_question.points_possible_raw)
+            ngen = calc_choice_question.calculated_generations
+            for igen in range(ngen):
+                # create mc question from calc_choice_question text and choices with values substitution
+                text = calc_choice_question.do_square_bracket_expansion(calc_choice_question.question_raw, igen)
+                self.append_question(text)
+                for choice in calc_choice_question.choices:
+                    text = calc_choice_question.do_square_bracket_expansion(choice.choice_raw, igen)
+                    text = calc_choice_question.do_curly_brace_expansion(text, igen)
+                    if choice.correct:
+                        self.append_mctf_correct_choice(text)
+                    else:
+                        self.append_mctf_incorrect_choice(text)
+            self.append_end_group('')
+        
+    def append_calculated_correct_choice(self, text: str):
+        if self._next_question_attr:
+            raise Text2qtiError('Expected question; question title and/or points were set but not used')
+        if not self.questions_and_delims:
+            raise Text2qtiError('Cannot have a calculated correct choice without a question')
+        last_question_or_delim = self.questions_and_delims[-1]
+        if not isinstance(last_question_or_delim, Question):
+            raise Text2qtiError('Cannot have a calculated correct choice without a question')
+        last_question_or_delim.append_calculated_correct_choice(text)
+
+    def append_calculated_incorrect_choice(self, text: str):
+        if self._next_question_attr:
+            raise Text2qtiError('Expected question; question title and/or points were set but not used')
+        if not self.questions_and_delims:
+            raise Text2qtiError('Cannot have a calculated incorrect choice without a question')
+        last_question_or_delim = self.questions_and_delims[-1]
+        if not isinstance(last_question_or_delim, Question):
+            raise Text2qtiError('Cannot have a calculated incorrect choice without a question')
+        last_question_or_delim.append_calculated_incorrect_choice(text)
 
     def append_start_group(self, text: str):
         if self._next_question_attr:
