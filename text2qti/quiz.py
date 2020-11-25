@@ -687,7 +687,6 @@ class Question(object):
             if bexpr not in self.calculated_varsets.varindexes:
                 self.calculated_varsets.depvars.append(CalculatedDepVar(bexpr, bexpr, 99))
                 self.calculated_varsets.varindexes[bexpr] = len(self.calculated_varsets.varindexes)
-                
     
     def append_calculated_correct_choice(self, text: str):
         self.append_calculated_choice(text, True)
@@ -712,9 +711,11 @@ class Question(object):
                 raise Text2qtiError(f'No variable named {vname} in {varsets.vars}')
             ivar = varsets.varindexes[vname]
             val = varsets.valsets[igen][ivar]
-            text = f'{text[:bmatch.start()]}{val:.{varsets.vars[ivar].decimal_places}f}{text[bmatch.end():]}'
+            try:
+                text = f'{text[:bmatch.start()]}{val:.{varsets.vars[ivar].decimal_places}f}{text[bmatch.end():]}'
+            except ValueError:
+                raise Text2qtiError(f'Format error in processing {text}')
         return text
-            
 
     def do_curly_brace_expansion(self, text: str, igen: int):
         '''
@@ -733,12 +734,18 @@ class Question(object):
                 raise Text2qtiError(f'No variable named {vname} in {varsets.vars}')
             ivar = varsets.varindexes[vname]
             val = varsets.valsets[igen][ivar]
-            if icolon > 0:
-                fmt = bmatch.group()[icolon+1:-1]
-                valstr = f'{val:{fmt}}'
-            else:
-                valstr = f'{val}'
-            text = f'{text[:bmatch.start()]}{valstr}{text[bmatch.end():]}'
+            try:
+                if icolon > 0:
+                    fmt = bmatch.group()[icolon+1:-1]
+                    valstr = f'{val:{fmt}}'
+                else:
+                    valstr = f'{val}'
+                if 'e' in valstr or 'E' in valstr:
+                    valstr = re.sub(r'([-+]?\d+(\.\d*)?|\.\d+)[eE]([-+]?)0*(\d+)', 
+                            r'\1×10<sup>\3\4</sup>', valstr)
+                text = f'{text[:bmatch.start()]}{valstr}{text[bmatch.end():]}'
+            except ValueError:
+                raise Text2qtiError(f'Format error in processing {text}')                
         return text
 
     def finalize(self):
